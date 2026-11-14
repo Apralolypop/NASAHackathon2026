@@ -1,0 +1,13 @@
+# PRISM cache
+data/prism_cache/
+
+# Generated datasets
+data/*.csv
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+venv/
