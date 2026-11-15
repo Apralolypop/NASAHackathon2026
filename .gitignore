@@ -11,3 +11,11 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
+
+# API keys
+.cdsapirc
+.env
+
+#ERA5cache
+era5_cache/
+*.nc

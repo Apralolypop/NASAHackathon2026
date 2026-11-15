@@ -10,7 +10,7 @@ from pipeline import generate_dataset
 # --------------------------------------------------
 
 st.set_page_config(
-    page_title="NASA Environmental Dataset Generator",
+    page_title="Environmental Dataset Generator",
     page_icon="🌱",
     layout="wide"
 )
@@ -25,10 +25,10 @@ st.title("🌱 Environmental Dataset Generator")
 st.write(
     """
     Generate machine-learning-ready environmental datasets
-    using historical NASA POWER data.
+    using NASA POWER, PRISM, and ERA5 historical climate data.
 
     Enter a location, select a date range, and generate
-    a CSV dataset for further analysis and model training.
+    a combined CSV dataset for further analysis and model training.
     """
 )
 
@@ -104,37 +104,6 @@ st.caption(
     "every six hours."
 )
 
-st.subheader("Additional climate data")
-
-include_prism = st.checkbox(
-    "Include PRISM data",
-    value=False
-)
-
-prism_variables = []
-
-if include_prism:
-
-    prism_variables = st.multiselect(
-        "PRISM variables",
-        options=[
-            "tmin",
-            "tmax",
-            "tmean",
-            "ppt"
-        ],
-        default=[
-            "tmin",
-            "tmax",
-            "ppt"
-        ]
-    )
-
-    st.info(
-        "PRISM provides daily data and currently covers "
-        "the contiguous United States through this API."
-    )
-
 
 # --------------------------------------------------
 # DATASET INFORMATION
@@ -145,21 +114,29 @@ st.subheader("4. Dataset information")
 
 st.write(
     """
-    The dataset includes environmental parameters such as:
-    - Air temperature
-    - Dew point temperature
-    - Relative humidity
-    - Specific humidity
-    - Atmospheric pressure
-    - Wind speed and direction
-    - Precipitation
-    - Solar radiation
+    The application automatically combines:
+
+    - NASA POWER: hourly meteorological observations.
+    - ERA5: hourly global climate reanalysis.
+    - PRISM: daily temperature and precipitation data
+      where geographic coverage is available.
+
+    The resulting CSV includes temperature, humidity,
+    atmospheric pressure, wind, precipitation, and
+    solar radiation variables.
     """
 )
 
 st.info(
-    "The generated CSV will be saved in the project's "
-    "'data' folder."
+    "All three sources are attempted automatically. "
+    "PRISM does not cover every location, including Canada. "
+    "If unavailable, its columns will contain missing values."
+)
+
+st.caption(
+    "Hourly timestamps are stored in UTC. "
+    "ERA5 uses a nearest grid point rather than an exact "
+    "measurement at the entered coordinates."
 )
 
 
@@ -176,13 +153,18 @@ if st.button(
 ):
 
     if start_date > end_date:
-        st.error("The start date must be before the end date.")
+
+        st.error(
+            "The start date must be before the end date."
+        )
 
     else:
+
         try:
 
             with st.spinner(
-                "Retrieving and processing NASA POWER data..."
+                "Retrieving NASA POWER, ERA5, and PRISM data. "
+                "This may take several minutes..."
             ):
 
                 df = generate_dataset(
@@ -190,14 +172,37 @@ if st.button(
                     longitude=longitude,
                     start_date=start_date,
                     end_date=end_date,
-                    interval=interval,
-                    include_prism=include_prism,
-                    prism_variables=prism_variables
+                    interval=interval
                 )
 
-            st.success("Dataset successfully generated!")
+            st.success(
+                "Combined dataset successfully generated!"
+            )
 
+            # -----------------------------
+            # Source status
+            # -----------------------------
+
+            st.subheader("Data source status")
+
+            source_status = df.attrs.get(
+                "source_status",
+                {}
+            )
+
+            for source, status in source_status.items():
+
+                if "Unavailable" in status:
+                    st.warning(f"**{source}:** {status}")
+                else:
+                    st.success(f"**{source}:** {status}")
+
+            # -----------------------------
             # Dataset statistics
+            # -----------------------------
+
+            st.subheader("Dataset statistics")
+
             col1, col2, col3 = st.columns(3)
 
             with col1:
@@ -218,7 +223,10 @@ if st.button(
                     f"{interval} hour(s)"
                 )
 
-            # Preview
+            # -----------------------------
+            # Dataset preview
+            # -----------------------------
+
             st.subheader("Dataset preview")
 
             st.dataframe(
@@ -226,7 +234,10 @@ if st.button(
                 use_container_width=True
             )
 
+            # -----------------------------
             # Missing data
+            # -----------------------------
+
             st.subheader("Missing data")
 
             missing_data = df.isna().sum()
@@ -236,20 +247,25 @@ if st.button(
                 use_container_width=True
             )
 
+            # -----------------------------
             # CSV download
-            csv_data = df.to_csv(index=False).encode("utf-8")
+            # -----------------------------
+
+            csv_data = df.to_csv(
+                index=False
+            ).encode("utf-8")
 
             st.download_button(
-                label="Download CSV",
+                label="Download combined CSV",
                 data=csv_data,
-                file_name="nasa_dataset.csv",
+                file_name="combined_dataset.csv",
                 mime="text/csv",
                 use_container_width=True
             )
 
             st.success(
-                "A copy of the dataset has also been saved "
-                "locally in the data folder."
+                "A copy of the combined dataset has also "
+                "been saved in the project's data folder."
             )
 
         except Exception as error:
