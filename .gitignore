@@ -2,7 +2,7 @@
 data/prism_cache/
 
 # Generated datasets
-data/*.csv
+# data/*.csv
 
 # Python cache
 __pycache__/
