@@ -8,6 +8,11 @@ from APIs.PRISMAPI import fetch_prism_data
 from APIs.ERA5API import fetch_era5_data
 from APIs.NOAAAPI import fetch_nao_data
 
+
+# --------------------------------------------------
+# 1. Configuration
+# --------------------------------------------------
+
 PARAMETERS = [
     "T2M",
     "T2MDEW",
@@ -35,9 +40,13 @@ PRISM_VARIABLES = [
 VALID_INTERVALS = [1, 2, 3, 4, 6, 12, 24]
 
 
+# --------------------------------------------------
+# 2. Normalize timestamps
+# --------------------------------------------------
+
 def normalize_timestamp(df):
     """
-    Normalize timestamps to UTC, stored without timezone
+    Normalize timestamps to UTC and remove timezone
     information so datasets can be merged consistently.
     """
 
@@ -55,15 +64,24 @@ def normalize_timestamp(df):
     return df
 
 
+# --------------------------------------------------
+# 3. Generate combined environmental dataset
+# --------------------------------------------------
+
 def generate_dataset(
     latitude,
     longitude,
     start_date,
     end_date,
-    interval=1 
+    interval=1
 ):
 
-    # 1. Validate inputs
+    # ----------------------------------------------
+    # Validate inputs
+    # ----------------------------------------------
+
+    latitude = float(latitude)
+    longitude = float(longitude)
 
     if not -90 <= latitude <= 90:
         raise ValueError("Invalid latitude.")
@@ -80,6 +98,10 @@ def generate_dataset(
     if interval not in VALID_INTERVALS:
         raise ValueError("Invalid sampling interval.")
 
+    # ----------------------------------------------
+    # Create output directory
+    # ----------------------------------------------
+
     project_root = Path(__file__).resolve().parent
 
     data_folder = project_root / "data"
@@ -87,7 +109,10 @@ def generate_dataset(
 
     source_status = {}
 
-    # 2. Retrieve NASA POWER data
+
+    # ==============================================
+    # 4. Retrieve NASA POWER hourly data
+    # ==============================================
 
     print("Retrieving NASA POWER data...")
 
@@ -119,62 +144,12 @@ def generate_dataset(
 
     source_status["NASA POWER"] = (
         f"Retrieved {len(nasa_df)} hourly observations."
-        )
-    # 3. Retrieve monthly NOAA NAO data and combine with NASA POWER
-
-    print("Retrieving monthly NOAA NAO data...")
-
-    nao_df = fetch_nao_data(
-        start_date=start_date,
-        end_date=end_date
     )
 
-    if nao_df.empty:
 
-        nasa_df["NAO_index"] = float("nan")
-
-        source_status["NOAA NAO"] = (
-            "No NAO observations available for the requested dates."
-        )
-
-    else:
-
-        # Create a common year-month identifier.
-
-        nasa_df["_NAO_month"] = (
-            nasa_df["Timestamp"].dt.to_period("M")
-        )
-
-        nao_df["_NAO_month"] = (
-            nao_df["Timestamp"].dt.to_period("M")
-        )
-
-        # Merge monthly NAO values into hourly NASA POWER data.
-
-        nasa_df = nasa_df.merge(
-            nao_df[["_NAO_month", "NAO_index"]],
-            on="_NAO_month",
-            how="left",
-            validate="many_to_one",
-            sort=False
-        )
-
-        nasa_df.drop(
-            columns=["_NAO_month"],
-            inplace=True
-        )
-
-        matched_months = (
-            nao_df["NAO_index"].notna().sum()
-        )
-
-        source_status["NOAA NAO"] = (
-            f"Retrieved {len(nao_df)} monthly observations; "
-            f"{matched_months} have valid index values."
-        )
-
-
-    # 4. Retrieve ERA5 hourly data
+    # ==============================================
+    # 5. Retrieve ERA5 hourly data
+    # ==============================================
 
     print("Retrieving hourly ERA5 data...")
 
@@ -209,8 +184,9 @@ def generate_dataset(
     )
 
 
-
-    # 5. Combine NASA POWER and ERA5
+    # ==============================================
+    # 6. Combine NASA POWER and ERA5
+    # ==============================================
 
     print("Combining NASA POWER and ERA5...")
 
@@ -226,7 +202,10 @@ def generate_dataset(
     combined_df["Latitude"] = latitude
     combined_df["Longitude"] = longitude
 
-    # 6. Retrieve daily PRISM data
+
+    # ==============================================
+    # 7. Retrieve daily PRISM data
+    # ==============================================
 
     print("Retrieving PRISM data...")
 
@@ -269,14 +248,15 @@ def generate_dataset(
                 "PRISM returned duplicate daily observations."
             )
 
-        # Make sure all expected PRISM columns exist.
+        # Ensure all expected PRISM columns exist.
 
         for column in prism_columns:
+
             if column not in prism_df.columns:
                 prism_df[column] = float("nan")
 
-        # Associate each hourly observation with its
-        # corresponding calendar date.
+        # Match hourly observations to their
+        # corresponding calendar dates.
 
         combined_df["Date"] = (
             combined_df["Timestamp"].dt.date
@@ -295,9 +275,8 @@ def generate_dataset(
 
     except Exception as error:
 
-        # Keep the dataset even if PRISM cannot be retrieved.
-        # This can happen outside PRISM coverage or because
-        # of a temporary API/network error.
+        # Keep the environmental dataset even if
+        # PRISM cannot be retrieved.
 
         for column in prism_columns:
             combined_df[column] = float("nan")
@@ -306,7 +285,10 @@ def generate_dataset(
             f"Could not retrieve PRISM data: {error}"
         )
 
-    # 7. Remove temporary date column
+
+    # ==============================================
+    # 8. Remove temporary date column
+    # ==============================================
 
     combined_df.drop(
         columns=["Date"],
@@ -314,7 +296,12 @@ def generate_dataset(
         errors="ignore"
     )
 
-    # 8. Apply sampling interval AFTER merging all sources
+
+    # ==============================================
+    # 9. Apply sampling interval
+    # ==============================================
+
+    print("Applying sampling interval...")
 
     combined_df = combined_df.dropna(
         subset=["Timestamp"]
@@ -337,9 +324,16 @@ def generate_dataset(
         .reset_index(drop=True)
     )
 
-    # 9. Export combined CSV
 
-    output_path = data_folder / "combined_dataset.csv"
+    # ==============================================
+    # 10. Save dataset WITHOUT NAO
+    # ==============================================
+
+    print("Saving dataset without NAO...")
+
+    output_path = (
+        data_folder / "combined_dataset.csv"
+    )
 
     combined_df.to_csv(
         output_path,
@@ -347,12 +341,205 @@ def generate_dataset(
     )
 
     print(
-        f"Combined dataset saved to: {output_path}"
+        f"Dataset without NAO saved: "
+        f"{len(combined_df)} observations."
+    )
+
+
+    # ==============================================
+    # 11. Retrieve NOAA NAO monthly data
+    # ==============================================
+
+    print("Retrieving monthly NOAA NAO data...")
+
+    try:
+
+        nao_df = fetch_nao_data(
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        required_nao_columns = {
+            "Timestamp",
+            "NAO_index"
+        }
+
+        if not required_nao_columns.issubset(
+            nao_df.columns
+        ):
+            raise ValueError(
+                "NOAA NAO is missing required columns."
+            )
+
+        nao_df = nao_df.copy()
+
+        nao_df["Timestamp"] = pd.to_datetime(
+            nao_df["Timestamp"],
+            errors="coerce"
+        )
+
+        nao_df["NAO_index"] = pd.to_numeric(
+            nao_df["NAO_index"],
+            errors="coerce"
+        )
+
+        nao_df = nao_df.dropna(
+            subset=["Timestamp", "NAO_index"]
+        ).copy()
+
+        if nao_df["Timestamp"].duplicated().any():
+            raise ValueError(
+                "NOAA NAO returned duplicate monthly observations."
+            )
+
+        source_status["NOAA NAO"] = (
+            f"Retrieved {len(nao_df)} valid monthly observations."
+        )
+
+    except Exception as error:
+
+        print(
+            f"Warning: Could not retrieve NOAA NAO data: {error}"
+        )
+
+        nao_df = pd.DataFrame(
+            columns=["Timestamp", "NAO_index"]
+        )
+
+        source_status["NOAA NAO"] = (
+            f"Could not retrieve NAO data: {error}"
+        )
+
+
+    # ==============================================
+    # 12. Combine NOAA NAO with environmental data
+    # ==============================================
+
+    print("Combining NOAA NAO with environmental data...")
+
+    if nao_df.empty:
+
+        # Create an empty dataset with the correct
+        # columns instead of introducing missing NAO values.
+
+        df_with_nao = combined_df.iloc[0:0].copy()
+
+        df_with_nao["NAO_index"] = pd.Series(
+            dtype="float64"
+        )
+
+        source_status["NOAA NAO"] += (
+            " No observations available for merging."
+        )
+
+    else:
+
+        # Identify the calendar month for each observation.
+
+        df_with_nao = combined_df.copy()
+
+        df_with_nao["_NAO_month"] = (
+            df_with_nao["Timestamp"].dt.to_period("M")
+        )
+
+        nao_df["_NAO_month"] = (
+            nao_df["Timestamp"].dt.to_period("M")
+        )
+
+        # Match hourly environmental observations
+        # to their corresponding monthly NAO values.
+
+        df_with_nao = df_with_nao.merge(
+            nao_df[["_NAO_month", "NAO_index"]],
+            on="_NAO_month",
+            how="inner",
+            validate="many_to_one",
+            sort=False
+        )
+
+        # Remove temporary merge column.
+
+        df_with_nao.drop(
+            columns=["_NAO_month"],
+            inplace=True
+        )
+
+        df_with_nao = (
+            df_with_nao
+            .sort_values("Timestamp")
+            .reset_index(drop=True)
+        )
+
+        matched_months = (
+            df_with_nao["Timestamp"]
+            .dt.to_period("M")
+            .nunique()
+        )
+
+        source_status["NOAA NAO"] = (
+            f"Matched NAO to {len(df_with_nao)} "
+            f"observations across {matched_months} months."
+        )
+
+
+    # ==============================================
+    # 13. Verify NAO dataset
+    # ==============================================
+
+    if df_with_nao["NAO_index"].isna().any():
+        raise ValueError(
+            "The dataset with NAO contains missing NAO values."
+        )
+
+    if df_with_nao.empty:
+        print(
+            "Warning: No observations with valid NAO values."
+        )
+
+
+    # ==============================================
+    # 14. Save dataset WITH NAO
+    # ==============================================
+
+    print("Saving dataset with NAO...")
+
+    nao_output_path = (
+        data_folder / "combined_dataset_with_nao.csv"
+    )
+
+    df_with_nao.to_csv(
+        nao_output_path,
+        index=False
     )
 
     print(
-        f"Final observations: {len(combined_df)}"
+        f"Dataset with NAO saved: "
+        f"{len(df_with_nao)} observations."
     )
+
+
+    # ==============================================
+    # 15. Final results
+    # ==============================================
+
+    print("\n---------- DATASET GENERATION COMPLETE ----------")
+
+    print(f"Without NAO: {output_path}")
+    print(f"With NAO:    {nao_output_path}")
+
+    print(
+        f"\nObservations without NAO: {len(combined_df)}"
+    )
+
+    print(
+        f"Observations with NAO: {len(df_with_nao)}"
+    )
+
+    print("\nSource status:")
+
+    for source, status in source_status.items():
+
+        print(f"{source}: {status}")
 
     # Make source information available to Streamlit.
 
